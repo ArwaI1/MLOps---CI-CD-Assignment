@@ -1,0 +1,69 @@
+name: ML Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install mlflow dvc
+
+      - name: Pull Data with DVC
+        # Appended "|| true" so it doesn't fail if you don't have a real DVC remote setup yet
+        run: dvc pull || true 
+
+      - name: Train Model
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          # CHANGE THIS TO 0.80 TO GET YOUR FAILED SCREENSHOT, THEN BACK TO 0.90 FOR SUCCESS
+          MOCK_ACCURACY: 0.90 
+        run: python train.py
+
+      - name: Export and Persist Run ID
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-info
+          path: model_info.txt
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install mlflow
+
+      - name: Download model_info.txt Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-info
+
+      - name: Check Accuracy Threshold
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: python check_threshold.py
+
+      - name: Mock Docker Build
+        run: |
+          RUN_ID=$(cat model_info.txt)
+          echo "Building Docker image for Run ID: $RUN_ID"
+          docker build --build-arg RUN_ID=$RUN_ID -t my-model-image .
